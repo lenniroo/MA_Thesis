@@ -1,0 +1,68 @@
+---
+title: Master Thesis - Development of a Hate Crime Forecasting Model Based on Detected
+  Hate Speech in Social Media
+author: "Lennart Roesemeier"
+date: "March 12, 2021"
+output: html_document
+---
+
+```{r loading rquired packages}
+#if (!require(rtweet)) install.packages("rtweet")
+#if (!require(httpuv)) install.packages("httpuv")
+if (!require(dplyr)) install.packages("dplyr")
+library(rtweet)
+library(httpuv)
+library(dplyr)
+
+```
+
+
+
+```{r Twitter Access}
+appname <- "maThesis_hateSpeech"
+
+key <- "H2vZ5rId6aN3Ghnb73Nq6sKvN"
+
+secret <- "BnR0DvvS7m8kfbwk1JZDxF5AUo14MbO6FtHFhrdM2MHlaHcYJX"
+
+access <- "984770013105139718-bMGBvkra0ZdYGCXPAtM9SOEL89ANo4X"
+
+access_secret <- "adRGjcZOVPQk4wPuHL6y5feXT5FZk3IyErAvqtN0I58io"
+
+maThesis_hateSpeech <- create_token(
+  app = appname,
+  consumer_key = key,
+  consumer_secret = secret,
+  access_token =bearer,
+  access_secret = access_secret)
+
+```
+
+```{r Tweets scrapen}
+tweets <- search_fullarchive("lang:de place_country:de", fromDate = "201501010000", toDate = "202101010000", env_name = "hs", token = maThesis_hateSpeech, n = 100000)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
