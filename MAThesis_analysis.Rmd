@@ -7,42 +7,158 @@ output: html_document
 ---
 
 ```{r loading rquired packages}
-#if (!require(rtweet)) install.packages("rtweet")
-#if (!require(httpuv)) install.packages("httpuv")
-if (!require(dplyr)) install.packages("dplyr")
-library(rtweet)
-library(httpuv)
+#if (!require(dplyr)) install.packages("dplyr")
+#if (!require(raedr)) install.packages("readr", dependencies = T)
+#if (!require(stringi)) install.packages("stringi", dependencies = T)
+#if (!require(stringr)) install.packages("stringr", dependencies = T)
+#if (!require(tm)) install.packages("tm", dependencies = T)
+
+
+library(readr)
 library(dplyr)
+library(stringi)
+library(stringr)
+library(tm)
 
+```
+
+```{r load hate speech data and merge it to one dataset}
+data <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_2015-2020_0.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data1 <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_2015-2020_1.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data2 <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_2015-2020_2.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data3 <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_2015-2020_3.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data_user <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\user_hateSpeech_2015-2020.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+
+data_user <- data_user %>% 
+  select(id, name, screen_name, location, description) %>%
+  rename("user_id" = "id")
+
+tweets1 <- data %>%
+  bind_rows(data1, data2, data3) %>%
+  select(created_at, full_text, user_id, user_id_str) %>%
+  left_join(data_user, by = "user_id")
+
+#write.csv(tweets, "C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech.csv", row.names = F)
+
+rm(data, data1, data2, data3, data_user)
+```
+
+```{r load tweets}
+tweets <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+```
+
+```{r check the encoding with small sample since it's German Twitter Data (reasoned by umlauts Ä, Ö, Ü, and ä, ö, ü)}
+data_n <- tweets %>%
+  slice(1:25)
+
+stri_enc_mark(data_n$full_text) #UTF-8 and ASCII
+all(stri_enc_isutf8(data_n$full_text)) #True = possible
+```
+
+```{r encode umlauts}
+#if the this file isn't open with UTF-8 encoding you have to replace the umlauts signs (e.g. Ã¤) with the actual UTF-8 encoded ones otherwise it doesn't work
+#my source = https://www.i18nqa.com/debug/utf8-debug.html
+encode_umlauts <- function(x) {
+  umlauts <- "Ã¤Ã¶Ã¼"
+  UMLAUTS <- 'Ã„Ã–Ãœ'
+  x <- gsub(pattern = paste0("([",UMLAUTS,"])"), replacement = "\\1", x)
+  x <- gsub(pattern = paste0("([",umlauts,"])"), replacement = "\\1", x)
+  x <- chartr(old = paste0(UMLAUTS, umlauts), new = "AeOeUeaeoeue", x)
+  #return(x)
+}
+
+tweets$full_text <- encode_umlauts(tweets$full_text)
+tweets$name <- encode_umlauts(tweets$name)
+tweets$screen_name <- encode_umlauts(tweets$screen_name)
+tweets$description <- encode_umlauts(tweets$description)
+tweets$location <- encode_umlauts(tweets$location)
+```
+
+```{r encode coordinates and get rid of all other non-alphanumerical characters}
+encode_coordinates <- function(x) {
+  x <- gsub("Â°", "°" , x)
+  x <- gsub("â€²", "", x)
+  x <- gsub("â€³", "", x)
+}
+
+tweets$location <- encode_coordinates(tweets$location)
+tweets$location <- str_replace_all(tweets$location,
+                c("ÃY" = "ss", "[\r\n]" = " ", 
+                  "[[:punct:]]" = " ", "[^a-zA-Z0-9°]" = " "))
+```
+
+```{r get rid of URLs}
+removeURL <- function(x) gsub("(f|ht)tp(s?)://\\S+", "", x, perl=T)
+
+tweets$full_text <- removeURL(tweets$full_text)
+tweets$location <- removeURL(tweets$location)
+tweets$description <- removeURL(tweets$description)
+```
+
+```{r get rid of usernames in Tweets and descriptions}
+remove_usernames <- function(x) gsub("@\\w+", "", x)
+
+tweets$full_text <- remove_usernames(tweets$full_text)
+tweets$description <- remove_usernames(tweets$description)
+```
+
+```{r encode ß, line break, and get rid of all non-alphanumerical characters}
+clean_tweets <- function(x) {
+  x <- gsub("ÃŸ", "ss", x)
+  x <- gsub("[\r\n]", " ", x)
+  x <- gsub("[[:punct:]]", " ", x)
+  x <- gsub("[^[:alnum:] ]", " ", x)
+  x <- gsub("[^a-zA-Z0-9]", " ", x)
+  x <- gsub("[\\s[:digit:]]", " ", x)
+}
+
+tweets$full_text <- clean_tweets(tweets$full_text)
+tweets$name <- clean_tweets(tweets$name)
+tweets$description <- clean_tweets(tweets$description)
 ```
 
 
 
-```{r Twitter Access}
-appname <- "maThesis_hateSpeech"
 
-key <- "H2vZ5rId6aN3Ghnb73Nq6sKvN"
 
-secret <- "BnR0DvvS7m8kfbwk1JZDxF5AUo14MbO6FtHFhrdM2MHlaHcYJX"
 
-access <- "984770013105139718-bMGBvkra0ZdYGCXPAtM9SOEL89ANo4X"
 
-access_secret <- "adRGjcZOVPQk4wPuHL6y5feXT5FZk3IyErAvqtN0I58io"
 
-maThesis_hateSpeech <- create_token(
-  app = appname,
-  consumer_key = key,
-  consumer_secret = secret,
-  access_token =bearer,
-  access_secret = access_secret)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r loading hate speech dataset by Ross et al}
+#hateURL <- 'https://raw.githubusercontent.com/UCSM-DUE/IWG_hatespeech_public/master/german%20hatespeech%20refugees.csv'
+#hate_speech <- read.csv(hateURL, encoding = 'utf-8')
+
+#hate_speech %>% filter(HatespeechOrNot..Expert.1. == "YES" | HatespeechOrNot..Expert.2. == "YES") %>% count() #154
+#hate_speech %>% filter(HatespeechOrNot..Expert.1. == "YES" & HatespeechOrNot..Expert.2. == "YES") %>% count() #54
 
 ```
-
-```{r Tweets scrapen}
-tweets <- search_fullarchive("lang:de place_country:de", fromDate = "201501010000", toDate = "202101010000", env_name = "hs", token = maThesis_hateSpeech, n = 100000)
-```
-
-
 
 
 
