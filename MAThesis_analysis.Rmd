@@ -12,13 +12,17 @@ output: html_document
 #if (!require(stringi)) install.packages("stringi", dependencies = T)
 #if (!require(stringr)) install.packages("stringr", dependencies = T)
 #if (!require(tm)) install.packages("tm", dependencies = T)
-
+#if (!require(e1071)) install.packages("e1071", dependencies = T)
+#if (!require(kernlab)) install.packages("kernlab", dependencies = T)
+#if (!require(RTextTools)) install.packages("RTextTools", dependencies = T)
 
 library(readr)
 library(dplyr)
 library(stringi)
 library(stringr)
 library(tm)
+library(RTextTools)
+library(e1071)
 
 ```
 
@@ -33,18 +37,18 @@ data_user <- data_user %>%
   select(id, name, screen_name, location, description) %>%
   rename("user_id" = "id")
 
-tweets1 <- data %>%
+tweets <- data %>%
   bind_rows(data1, data2, data3) %>%
   select(created_at, full_text, user_id, user_id_str) %>%
   left_join(data_user, by = "user_id")
 
-#write.csv(tweets, "C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech.csv", row.names = F)
+#write.csv(tweets, "C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech.csv", row.names = F) #dirty data
 
 rm(data, data1, data2, data3, data_user)
 ```
 
 ```{r load tweets}
-tweets <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+#tweets <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
 ```
 
 ```{r check the encoding with small sample since it's German Twitter Data (reasoned by umlauts Ä, Ö, Ü, and ä, ö, ü)}
@@ -52,19 +56,14 @@ data_n <- tweets %>%
   slice(1:25)
 
 stri_enc_mark(data_n$full_text) #UTF-8 and ASCII
-all(stri_enc_isutf8(data_n$full_text)) #True = possible
+all(stri_enc_isutf8(data_n$full_text)) #True = it's possible to encode
 ```
 
 ```{r encode umlauts}
-#if the this file isn't open with UTF-8 encoding you have to replace the umlauts signs (e.g. Ã¤) with the actual UTF-8 encoded ones otherwise it doesn't work
-#my source = https://www.i18nqa.com/debug/utf8-debug.html
+#if the this file isn't open with UTF-8 encoding you have to replace the umlauts decoded #signs (e.g. Ã¤) with the actual UTF-8 encoded ones (from e.g. my source: #https://www.i18nqa.com/debug/utf8-debug.html) otherwise it doesn't work
 encode_umlauts <- function(x) {
-  umlauts <- "Ã¤Ã¶Ã¼"
-  UMLAUTS <- 'Ã„Ã–Ãœ'
-  x <- gsub(pattern = paste0("([",UMLAUTS,"])"), replacement = "\\1", x)
-  x <- gsub(pattern = paste0("([",umlauts,"])"), replacement = "\\1", x)
-  x <- chartr(old = paste0(UMLAUTS, umlauts), new = "AeOeUeaeoeue", x)
-  #return(x)
+  x <- stringr::str_replace_all(x, c('Ã„' = "Ae", "Ã–" = "Oe", "Ãœ" = "Ue",
+                            "Ã¤" = "ae", "Ã¶" = "oe", "Ã¼" = "ue"))
 }
 
 tweets$full_text <- encode_umlauts(tweets$full_text)
@@ -83,12 +82,12 @@ encode_coordinates <- function(x) {
 
 tweets$location <- encode_coordinates(tweets$location)
 tweets$location <- str_replace_all(tweets$location,
-                c("ÃY" = "ss", "[\r\n]" = " ", 
+                c("ÃY" = "s", "[\r\n]" = " ", 
                   "[[:punct:]]" = " ", "[^a-zA-Z0-9°]" = " "))
 ```
 
 ```{r get rid of URLs}
-removeURL <- function(x) gsub("(f|ht)tp(s?)://\\S+", "", x, perl=T)
+removeURL <- function(x) gsub("(f|ht)tp(s?)://\\S+", "", x, perl=T) 
 
 tweets$full_text <- removeURL(tweets$full_text)
 tweets$location <- removeURL(tweets$location)
@@ -104,66 +103,142 @@ tweets$description <- remove_usernames(tweets$description)
 
 ```{r encode ß, line break, and get rid of all non-alphanumerical characters}
 clean_tweets <- function(x) {
-  x <- gsub("ÃŸ", "ss", x)
+  x <- gsub("ÃŸ", "s", x)
   x <- gsub("[\r\n]", " ", x)
   x <- gsub("[[:punct:]]", " ", x)
   x <- gsub("[^[:alnum:] ]", " ", x)
   x <- gsub("[^a-zA-Z0-9]", " ", x)
-  x <- gsub("[\\s[:digit:]]", " ", x)
+  x <- gsub("amp", "", x)
 }
 
 tweets$full_text <- clean_tweets(tweets$full_text)
 tweets$name <- clean_tweets(tweets$name)
 tweets$description <- clean_tweets(tweets$description)
+
+tweets$full_text <- str_replace(tweets$full_text, "gt", "")
+```
+
+```{r store clean Tweets as csv-file}
+#write.csv(tweets, "C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_clean.csv", row.names = F, fileEncoding = "utf-8")
+```
+
+```{r final touch of cleaning}
+corpus <- iconv(tweets$full_text)
+corpus <- Corpus(VectorSource(corpus))
+
+tweets_clean <- tm_map(corpus, stripWhitespace)
+rm(corpus)
+```
+
+
+```{r loading training hate speech dataset by Ross et al}
+hateURL <- 'https://raw.githubusercontent.com/UCSM-DUE/IWG_hatespeech_public/master/german%20hatespeech%20refugees.csv'
+hate_speech <- read.csv(hateURL, encoding = 'utf-8')
+
+hate_speech %>% 
+  filter(HatespeechOrNot..Expert.1. == "YES" | HatespeechOrNot..Expert.2. == "YES") %>% 
+  count() #154
+
+hate_speech %>% 
+  filter(HatespeechOrNot..Expert.1. == "YES" & HatespeechOrNot..Expert.2. == "YES") %>% 
+  count() #54
+
+hate_speech %>% 
+  filter(HatespeechOrNot..Expert.1. == "NO" & HatespeechOrNot..Expert.2. == "NO") %>% 
+  count() #315
+```
+
+```{r clean Tweets in training dataset}
+hate_speech$Tweet <- encode_umlauts(hate_speech$Tweet)
+hate_speech$Tweet <- clean_tweets(hate_speech$Tweet)
+```
+
+```{r labeling hate speech: 1 == "hate speech", 0 == "no hate speech"}
+hate_speech <- hate_speech %>%
+  mutate(label = if_else(HatespeechOrNot..Expert.1. == "NO" & HatespeechOrNot..Expert.2. == "NO",0,1))
 ```
 
 
 
+```{r}
+set.seed(1312)
+samp_id <- sample(1:nrow(hate_speech),
+                  round(nrow(hate_speech)*.70),
+                  replace = F)
 
+train <- hate_speech[samp_id, ]
+test <- hate_speech[-samp_id, ]
 
+random <- rbind(train,test)
+```
 
+```{r}
+corpus <- Corpus(VectorSource(random$Tweet))
+dtm <- DocumentTermMatrix(corpus, 
+                          control = list(weighting = 
+                                           function(x)
+                                             weightTfIdf(x, normalize = F)))
 
+train_codes = random$label
 
+container <- create_container(dtm, 
+                              t(train_codes),
+                              trainSize = 1:nrow(train),
+                              testSize = (nrow(train)+1):nrow(random),
+                              virgin = F)
 
+models <- train_models(container, algorithms = c("SVM"), kernel = "radial", cost = 1)
 
+results <- classify_models(container, models)
 
+out <- data.frame(model_sentiment = results$SVM_LABEL,
+                  model_prob = results$SVM_PROB,
+                  actual_sentiment = random$label[(nrow(train)+1):nrow(random)])
 
+#summary(out)
 
+(z = as.matrix(table(out[,1], out[,3])))
 
+(pct = round(((z[1,1] + z[2,2]) / sum(z)) * 100, 2))
+```
 
+```{r}
+corpus <- Corpus(VectorSource(test$Tweet))
+dtm_test <- DocumentTermMatrix(corpus, 
+                               control = list(weighting = 
+                                                function(x)
+                                                  weightTfIdf(x, normalize = F)))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-```{r loading hate speech dataset by Ross et al}
-#hateURL <- 'https://raw.githubusercontent.com/UCSM-DUE/IWG_hatespeech_public/master/german%20hatespeech%20refugees.csv'
-#hate_speech <- read.csv(hateURL, encoding = 'utf-8')
-
-#hate_speech %>% filter(HatespeechOrNot..Expert.1. == "YES" | HatespeechOrNot..Expert.2. == "YES") %>% count() #154
-#hate_speech %>% filter(HatespeechOrNot..Expert.1. == "YES" & HatespeechOrNot..Expert.2. == "YES") %>% count() #54
-
+row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+dtm_f = c(dtm, dtm_test)
+train_codes_f <- c(train_codes,
+                   rep(NA, length(test)))
 ```
 
 
+```{r}
+container_f = create_container(dtm_f, 
+                               t(train_codes_f), trainSize = 1:nrow(dtm),
+                               testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                               virgin = T)
 
+model_f <- train_models(container_f, algorithms = c("SVM"), kernel = "radial", cost = 1)
 
+prediction <- classify_models(container_f, model_f)
 
+out_p <- data.frame(model_sentiment = prediction$SVM_LABEL,
+                    model_prob = prediction$SVM_PROB,
+                    text = test)
+
+head(out_p,10)
+```
+
+```{r}
+out_p %>%
+  filter(model_sentiment == text.label) %>%
+  count() 
+#139 out of 141, quite accurate despite that the prediction accuracy was ~ 65% w/ training 
+```
 
 
 
