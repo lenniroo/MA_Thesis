@@ -16,6 +16,7 @@ output: html_document
 #if (!require(kernlab)) install.packages("kernlab", dependencies = T)
 #if (!require(RTextTools)) install.packages("RTextTools", dependencies = T)
 #if (!require(tidyverse)) install.packages("tidyverse", dependencies = T)
+#if (!require(rstudioapi)) install.packages("rstudioapi", dependencies = T)
 
 library(tidyverse)
 library(readr)
@@ -24,16 +25,25 @@ library(stringi)
 library(stringr)
 library(tm)
 library(RTextTools)
-library(e1071)
+library(rstudioapi)
 
 ```
 
+```{r}
+#store the .Rmd-file as well as the .csv-files at your desired location
+#by running this chunk you do not have to indicate your wd at commands like read/write.csv
+wd <- rstudioapi::getActiveDocumentContext()$path
+setwd(dirname(wd))
+print(getwd())
+```
+
+
 ```{r load hate speech data and merge it to one dataset}
-data <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_2015-2020_0.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
-data1 <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_2015-2020_1.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
-data2 <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_2015-2020_2.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
-data3 <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_2015-2020_3.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
-data_user <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\user_hateSpeech_2015-2020.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data <- read.csv2("tweets_hateSpeech_2015-2020_0.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data1 <- read.csv2("tweets_hateSpeech_2015-2020_1.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data2 <- read.csv2("tweets_hateSpeech_2015-2020_2.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data3 <- read.csv2("tweets_hateSpeech_2015-2020_3.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+data_user <- read.csv2("user_hateSpeech_2015-2020.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
 
 data_user <- data_user %>% 
   select(id, name, screen_name, location, description) %>%
@@ -44,13 +54,13 @@ tweets <- data %>%
   select(created_at, full_text, user_id, user_id_str) %>%
   left_join(data_user, by = "user_id")
 
-#write.csv(tweets, "C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech.csv", row.names = F) #dirty data
+write.csv(tweets, "tweets_hateSpeech.csv", row.names = F) #dirty data
 
 rm(data, data1, data2, data3, data_user)
 ```
 
 ```{r load tweets}
-#tweets <- read.csv2("C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+#tweets <- read.csv2("tweets_hateSpeech.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
 ```
 
 ```{r check the encoding with small sample since it's German Twitter Data (reasoned by umlauts Ä, Ö, Ü, and ä, ö, ü)}
@@ -122,7 +132,7 @@ tweets$full_text <- str_replace(tweets$full_text, "gt", "")
 ```
 
 ```{r store clean Tweets as csv-file}
-#write.csv(tweets, "C:\\Users\\Lennart\\OneDrive\\0_MAThesis\\data\\tweets_hateSpeech_clean.csv", row.names = F, fileEncoding = "utf-8")
+#write.csv(tweets, "tweets_hateSpeech_clean.csv", row.names = F, fileEncoding = "utf-8")
 ```
 
 ```{r final touch of cleaning}
@@ -165,73 +175,95 @@ hate_speech <- hate_speech %>%
 ```
 
 
-
-
-
-
 ```{r}
-train_t <- hate_speech %>%
-  select(Tweet, label)
+set.seed(1312)
 
-tr <- train_t[1:279, ]
-te <- train_t[280:469, ]
+samp_train <- sample(1:nrow(hate_speech),
+               round(nrow(hate_speech)*.70),
+               replace = F)
 
-test_t <- tweets %>%
-  select(full_text) %>%
-  rename(Tweet = full_text) %>%
-  mutate(label = "") %>%
-  na_if("")
+tr <- hate_speech[samp_train, ]
+te <- hate_speech[-samp_train, ]
 
-test_test <- test_t[1:82080, ]
+hate_speech <- rbind(tr,te)
 
-#random_t <- rbind(train_t,test_t)
+tr <- tr[ , -c(2:4)]
+te <- te[ , -c(2:4)]
 
-random_test <- rbind(train_t,test_test)
+train <- rbind(tr,te)
 ```
 
 ```{r train SVM with Ross et al. data}
-corpus <- Corpus(VectorSource(train_t$Tweet))
+corpus <- Corpus(VectorSource(train$Tweet))
 dtm <- DocumentTermMatrix(corpus, 
                           control = list(weighting = 
                                            function(x)
                                              weightTfIdf(x, normalize = F)))
 
-train_codes = train_t$label
+train_codes = train$label
 
 container <- create_container(dtm, 
                               t(train_codes),
                               trainSize = 1:nrow(tr),
-                              testSize = (nrow(tr)+1):nrow(train_t),
+                              testSize = (nrow(tr)+1):nrow(train),
                               virgin = F)
 
-models <- train_models(container, algorithms = c("SVM"), kernel = "radial", cost = 1)
+models <- train_models(container, algorithms = c("SVM"), kernel = "radial", cost = 5)
 
 results <- classify_models(container, models)
 
 out <- data.frame(model_label = results$SVM_LABEL,
                   model_prob = results$SVM_PROB,
-                  actual_label = train_t$label[(nrow(tr)+1):nrow(train_t)])
+                  actual_label = train$label[(nrow(tr)+1):nrow(train)])
 
 (z = as.matrix(table(out[,1], out[,3])))
 
 (pct = round(((z[1,1] + z[2,2]) / sum(z)) * 100, 2)) #~ 70% accuracy
 
-
+rm(tr,te)
 ```
 
 
+
+
+```{r}
+set.seed(420)
+
+tweets <- tweets %>%
+  distinct()
+
+samp <- sample(1:nrow(tweets),
+               round(nrow(tweets)*.50),
+               replace = F)
+random1 <- tweets[samp, ]
+random2 <- tweets[-samp, ]
+
+tweets <- rbind(random1,random2)
+
+test <- tweets %>%
+  select(full_text) %>%
+  rename(Tweet = full_text) %>%
+  mutate(label = "") %>%
+  na_if("")
+
+#random_t <- rbind(train,test)
+
+rm(random1,random2)
+```
+
 ```{r SVM loop on test data}
-c <- 1:432
-index <- rep(c, each = 190)
-test_test <- cbind(test_test,index)
+c <- 1:777
+index <- rep(c, each = 132)
+test1 <- test[1:102564, ]
+test1 <- cbind(test1,index)
 
 l <- list()
 
 count <- 1
 
 for (i in c) {
-  if(count %in% test_test$index) {
-    df <- test_test[which(test_test$index == count), ]
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
     
     corpus = Corpus(VectorSource(df$Tweet))
     dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
@@ -267,17 +299,465 @@ for (i in c) {
   count <- count + 1
 }
 
+write.csv(combined, "wave1_SVM.csv", row.names = F, fileEncoding = "utf-8")
+```
 
 
-#perhaps it's possible to create a new column with indicies and sample over the index criteria, index = 1:4321, 190 steps; take the first 190 apply svm bind rows, take the second 190 apply svm bind rows, take the third 190 apply svm bind rows, ...
+```{r}
+test1 <- test[102565:205128, ]
+test1 <- cbind(test1,index)
 
+l <- list()
+
+count <- 1
+
+for (i in c) {
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
+    
+    corpus = Corpus(VectorSource(df$Tweet))
+    dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
+                                                           function(x)
+                                                             weightTfIdf(x, normalize = F)))
+    
+    row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+    
+    dtm_p = c(dtm, dtm_test)   
+    
+    train_codes_p = c(train_codes, 
+                      rep(NA, length(df))) 
+    
+    container_p <- create_container(dtm_p,
+                                    t(train_codes_p),
+                                    trainSize = 1:nrow(dtm),
+                                    testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                                    virgin = T)
+    
+    model_p <- train_models(container_p, algorithms = c("SVM"), kernel = "radial", cost = 1)
+    
+    prediction <- classify_models(container_p, model_p)
+    
+    out_p <- data.frame(model_label = prediction$SVM_LABEL,
+                        model_prob = prediction$SVM_PROB,
+                        actual = df)
+    
+  }
+  
+  l[[i]] <- out_p
+  combined2 <- bind_rows(l)
+  
+  count <- count + 1
+}
+
+combined <- rbind(combined,combined2)
+write.csv(combined, "wave2_SVM.csv", row.names = F, fileEncoding = "utf-8")
+rm(combined2)
 ```
 
 ```{r}
-combined %>%
-  filter(model_label == 1) %>%
-  count() #10% sample ~ 1814 hate speech/offensive language
+test1 <- test[205129:307692, ]
+test1 <- cbind(test1,index)
+
+l <- list()
+
+count <- 1
+
+for (i in c) {
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
+    
+    corpus = Corpus(VectorSource(df$Tweet))
+    dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
+                                                           function(x)
+                                                             weightTfIdf(x, normalize = F)))
+    
+    row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+    
+    dtm_p = c(dtm, dtm_test)   
+    
+    train_codes_p = c(train_codes, 
+                      rep(NA, length(df))) 
+    
+    container_p <- create_container(dtm_p,
+                                    t(train_codes_p),
+                                    trainSize = 1:nrow(dtm),
+                                    testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                                    virgin = T)
+    
+    model_p <- train_models(container_p, algorithms = c("SVM"), kernel = "radial", cost = 1)
+    
+    prediction <- classify_models(container_p, model_p)
+    
+    out_p <- data.frame(model_label = prediction$SVM_LABEL,
+                        model_prob = prediction$SVM_PROB,
+                        actual = df)
+    
+  }
+  
+  l[[i]] <- out_p
+  combined3 <- bind_rows(l)
+  
+  count <- count + 1
+}
+
+combined <- rbind(combined,combined3)
+write.csv(combined, "wave3_SVM.csv", row.names = F, fileEncoding = "utf-8")
+rm(combined3)
 ```
+
+```{r}
+test1 <- test[307693:410256, ]
+test1 <- cbind(test1,index)
+
+l <- list()
+
+count <- 1
+
+for (i in c) {
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
+    
+    corpus = Corpus(VectorSource(df$Tweet))
+    dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
+                                                           function(x)
+                                                             weightTfIdf(x, normalize = F)))
+    
+    row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+    
+    dtm_p = c(dtm, dtm_test)   
+    
+    train_codes_p = c(train_codes, 
+                      rep(NA, length(df))) 
+    
+    container_p <- create_container(dtm_p,
+                                    t(train_codes_p),
+                                    trainSize = 1:nrow(dtm),
+                                    testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                                    virgin = T)
+    
+    model_p <- train_models(container_p, algorithms = c("SVM"), kernel = "radial", cost = 1)
+    
+    prediction <- classify_models(container_p, model_p)
+    
+    out_p <- data.frame(model_label = prediction$SVM_LABEL,
+                        model_prob = prediction$SVM_PROB,
+                        actual = df)
+    
+  }
+  
+  l[[i]] <- out_p
+  combined4 <- bind_rows(l)
+  
+  count <- count + 1
+}
+
+combined <- rbind(combined,combined4)
+write.csv(combined, "wave4_SVM.csv", row.names = F, fileEncoding = "utf-8")
+rm(combined4)
+```
+
+```{r}
+test1 <- test[410257:512820, ]
+test1 <- cbind(test1,index)
+
+l <- list()
+
+count <- 1
+
+for (i in c) {
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
+    
+    corpus = Corpus(VectorSource(df$Tweet))
+    dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
+                                                           function(x)
+                                                             weightTfIdf(x, normalize = F)))
+    
+    row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+    
+    dtm_p = c(dtm, dtm_test)   
+    
+    train_codes_p = c(train_codes, 
+                      rep(NA, length(df))) 
+    
+    container_p <- create_container(dtm_p,
+                                    t(train_codes_p),
+                                    trainSize = 1:nrow(dtm),
+                                    testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                                    virgin = T)
+    
+    model_p <- train_models(container_p, algorithms = c("SVM"), kernel = "radial", cost = 1)
+    
+    prediction <- classify_models(container_p, model_p)
+    
+    out_p <- data.frame(model_label = prediction$SVM_LABEL,
+                        model_prob = prediction$SVM_PROB,
+                        actual = df)
+    
+  }
+  
+  l[[i]] <- out_p
+  combined5 <- bind_rows(l)
+  
+  count <- count + 1
+}
+
+combined <- rbind(combined,combined5)
+write.csv(combined, "wave5_SVM.csv", row.names = F, fileEncoding = "utf-8")
+rm(combined5)
+```
+
+```{r}
+test1 <- test[512821:615384, ]
+test1 <- cbind(test1,index)
+
+l <- list()
+
+count <- 1
+
+for (i in c) {
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
+    
+    corpus = Corpus(VectorSource(df$Tweet))
+    dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
+                                                           function(x)
+                                                             weightTfIdf(x, normalize = F)))
+    
+    row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+    
+    dtm_p = c(dtm, dtm_test)   
+    
+    train_codes_p = c(train_codes, 
+                      rep(NA, length(df))) 
+    
+    container_p <- create_container(dtm_p,
+                                    t(train_codes_p),
+                                    trainSize = 1:nrow(dtm),
+                                    testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                                    virgin = T)
+    
+    model_p <- train_models(container_p, algorithms = c("SVM"), kernel = "radial", cost = 1)
+    
+    prediction <- classify_models(container_p, model_p)
+    
+    out_p <- data.frame(model_label = prediction$SVM_LABEL,
+                        model_prob = prediction$SVM_PROB,
+                        actual = df)
+    
+  }
+  
+  l[[i]] <- out_p
+  combined6 <- bind_rows(l)
+  
+  count <- count + 1
+}
+
+combined <- rbind(combined,combined6)
+write.csv(combined, "wave6_SVM.csv", row.names = F, fileEncoding = "utf-8")
+rm(combined6)
+```
+
+```{r}
+test1 <- test[615385:717948, ]
+test1 <- cbind(test1,index)
+
+l <- list()
+
+count <- 1
+
+for (i in c) {
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
+    
+    corpus = Corpus(VectorSource(df$Tweet))
+    dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
+                                                           function(x)
+                                                             weightTfIdf(x, normalize = F)))
+    
+    row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+    
+    dtm_p = c(dtm, dtm_test)   
+    
+    train_codes_p = c(train_codes, 
+                      rep(NA, length(df))) 
+    
+    container_p <- create_container(dtm_p,
+                                    t(train_codes_p),
+                                    trainSize = 1:nrow(dtm),
+                                    testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                                    virgin = T)
+    
+    model_p <- train_models(container_p, algorithms = c("SVM"), kernel = "radial", cost = 1)
+    
+    prediction <- classify_models(container_p, model_p)
+    
+    out_p <- data.frame(model_label = prediction$SVM_LABEL,
+                        model_prob = prediction$SVM_PROB,
+                        actual = df)
+    
+  }
+  
+  l[[i]] <- out_p
+  combined7 <- bind_rows(l)
+  
+  count <- count + 1
+}
+
+combined <- rbind(combined,combined7)
+write.csv(combined, "wave7_SVM.csv", row.names = F, fileEncoding = "utf-8")
+rm(combined7)
+```
+
+```{r}
+test1 <- test[717949:820512, ]
+test1 <- cbind(test1,index)
+
+l <- list()
+
+count <- 1
+
+for (i in c) {
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
+    
+    corpus = Corpus(VectorSource(df$Tweet))
+    dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
+                                                           function(x)
+                                                             weightTfIdf(x, normalize = F)))
+    
+    row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+    
+    dtm_p = c(dtm, dtm_test)   
+    
+    train_codes_p = c(train_codes, 
+                      rep(NA, length(df))) 
+    
+    container_p <- create_container(dtm_p,
+                                    t(train_codes_p),
+                                    trainSize = 1:nrow(dtm),
+                                    testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                                    virgin = T)
+    
+    model_p <- train_models(container_p, algorithms = c("SVM"), kernel = "radial", cost = 1)
+    
+    prediction <- classify_models(container_p, model_p)
+    
+    out_p <- data.frame(model_label = prediction$SVM_LABEL,
+                        model_prob = prediction$SVM_PROB,
+                        actual = df)
+    
+  }
+  
+  l[[i]] <- out_p
+  combined8 <- bind_rows(l)
+  
+  count <- count + 1
+}
+
+combined <- rbind(combined,combined8)
+write.csv(combined, "wave8_SVM.csv", row.names = F, fileEncoding = "utf-8")
+rm(combined8)
+```
+
+```{r}
+c <- 1:6
+index <- rep(c, each = 63)
+test1 <- test[820513:820890, ]
+test1 <- cbind(test1,index)
+
+l <- list()
+
+count <- 1
+
+for (i in c) {
+  if(count %in% test1$index) {
+    df <- test1[which(test1$index == count), ]
+    
+    corpus = Corpus(VectorSource(df$Tweet))
+    dtm_test = DocumentTermMatrix(corpus, control = list(weighting = 
+                                                           function(x)
+                                                             weightTfIdf(x, normalize = F)))
+    
+    row.names(dtm_test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test))
+    
+    dtm_p = c(dtm, dtm_test)   
+    
+    train_codes_p = c(train_codes, 
+                      rep(NA, length(df))) 
+    
+    container_p <- create_container(dtm_p,
+                                    t(train_codes_p),
+                                    trainSize = 1:nrow(dtm),
+                                    testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm_test)),
+                                    virgin = T)
+    
+    model_p <- train_models(container_p, algorithms = c("SVM"), kernel = "radial", cost = 1)
+    
+    prediction <- classify_models(container_p, model_p)
+    
+    out_p <- data.frame(model_label = prediction$SVM_LABEL,
+                        model_prob = prediction$SVM_PROB,
+                        actual = df)
+    
+  }
+  
+  l[[i]] <- out_p
+  combined9 <- bind_rows(l)
+  
+  count <- count + 1
+}
+
+combined <- rbind(combined,combined9)
+write.csv(combined, "predictedHateSpeechTweets_bySVM.csv", row.names = F, fileEncoding = "utf-8")
+rm(combined9)
+```
+
+
+
+```{r}
+tweets <- tweets[1:820890, ]
+
+tw <- tweets %>%
+  rename(Tweet = full_text)
+
+com <- combined %>%
+  select(model_label, model_prob, actual.Tweet) 
+
+all <- cbind(tw, com)
+
+all <- all[, -c(4,11)]
+
+write.csv(all, "ClassifiedTweets.csv", row.names = F, fileEncoding = "utf-8")
+
+all %>%
+  filter(model_label == 1) %>%
+  count() #40257
+
+rm(com,tw,container,container_p,corpus,
+   df,dtm,dtm_p,dtm_test,l,model_p,models,
+   out,out_p,prediction,results,test1,c,
+   count,i,index,pct,samp,samp_train,
+   train_codes,train_codes_p,z,hate_speech,
+   hateURL,test,train,combined,tweets)
+```
+
+```{r}
+hate <- all %>%
+  filter(model_label == 1)
+
+hate <- hate %>%
+  mutate_at(vars(model_label, model_prob), as.numeric) %>%
+  arrange(desc(model_prob))
+
+summary(hate) #3rd Quantil = 0.6067
+
+#greater than the 3rd Quantil (chance to classify right above 60%)
+hate_new <- hate %>%
+  filter(model_prob > 0.6) #11093
+```
+
+
 
 
 
