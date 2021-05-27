@@ -7,25 +7,28 @@ output: html_document
 ---
 
 ```{r loading rquired packages}
-#if (!require(dplyr)) install.packages("dplyr")
-#if (!require(raedr)) install.packages("readr", dependencies = T)
-#if (!require(stringi)) install.packages("stringi", dependencies = T)
-#if (!require(stringr)) install.packages("stringr", dependencies = T)
-#if (!require(tm)) install.packages("tm", dependencies = T)
-#if (!require(e1071)) install.packages("e1071", dependencies = T)
-#if (!require(kernlab)) install.packages("kernlab", dependencies = T)
-#if (!require(RTextTools)) install.packages("RTextTools", dependencies = T)
-#if (!require(tidyverse)) install.packages("tidyverse", dependencies = T)
-#if (!require(rstudioapi)) install.packages("rstudioapi", dependencies = T)
+if (!("rstudioapi" %in% installed.packages())) {
+ install.packages("rstudioapi", dependencies = T)}
+if (!("readr" %in% installed.packages())) {
+ install.packages("readr", dependencies = T)}
+if (!("stringi" %in% installed.packages())) {
+ install.packages("stringi", dependencies = T)}
+if (!("stringr" %in% installed.packages())) {
+ install.packages("stringr", dependencies = T)}
+if (!("tm" %in% installed.packages())) {
+ install.packages("tm", dependencies = T)}
+if (!("RTextTools" %in% installed.packages())) {
+ install.packages("RTextTools", dependencies = T)}
+if (!("tidyverse" %in% installed.packages())) {
+ install.packages("tidyverse", dependencies = T)}
 
-library(tidyverse)
+library(rstudioapi)
 library(readr)
-library(dplyr)
 library(stringi)
 library(stringr)
 library(tm)
 library(RTextTools)
-library(rstudioapi)
+library(tidyverse)
 
 ```
 
@@ -193,7 +196,7 @@ te <- te[ , -c(2:4)]
 train <- rbind(tr,te)
 ```
 
-```{r train SVM with Ross et al. data}
+```{r train SVM with Ross et al. 2017 data}
 corpus <- Corpus(VectorSource(train$Tweet))
 dtm <- DocumentTermMatrix(corpus, 
                           control = list(weighting = 
@@ -208,19 +211,35 @@ container <- create_container(dtm,
                               testSize = (nrow(tr)+1):nrow(train),
                               virgin = F)
 
-models <- train_models(container, algorithms = c("SVM"), kernel = "radial", cost = 5)
+models <- train_models(container, algorithms = c("SVM", "TREE", "BAGGING", "BOOSTING", "RF"), kernel = "radial", cost = 1)
 
 results <- classify_models(container, models)
 
-out <- data.frame(model_label = results$SVM_LABEL,
-                  model_prob = results$SVM_PROB,
+out <- data.frame(label_svm = results$SVM_LABEL,
+                  prob_svm = results$SVM_PROB,
+                  label_tree = results$TREE_LABEL,
+                  prob_tree = results$TREE_PROB,
+                  label_bagging = results$BAGGING_LABEL,
+                  prob_bagging = results$BAGGING_PROB,
+                  label_boosting = results$LOGITBOOST_LABEL,
+                  prob_boosting = results$LOGITBOOST_PROB,
+                  label_rf = results$FORESTS_LABEL,
+                  prob_rf = results$FORESTS_PROB,
                   actual_label = train$label[(nrow(tr)+1):nrow(train)])
 
-(z = as.matrix(table(out[,1], out[,3])))
+(z_svm = as.matrix(table(out[,1], out[,11])))
+(z_tree = as.matrix(table(out[,3], out[,11])))
+(z_bagging = as.matrix(table(out[,5], out[,11])))
+(z_boosting = as.matrix(table(out[,7], out[,11])))
+(z_rf = as.matrix(table(out[,9], out[,11])))
 
-(pct = round(((z[1,1] + z[2,2]) / sum(z)) * 100, 2)) #~ 70% accuracy
+(pct_svm = round(((z_svm[1,1] + z_svm[2,2]) / sum(z_svm)) * 100, 2))                      #64.54% accuracy
+(pct_tree = round(((z_tree[1,1] + z_tree[2,2]) / sum(z_tree)) * 100, 2))                  #63.83% accuracy
+(pct_bagging = round(((z_bagging[1,1] + z_bagging[2,2]) / sum(z_bagging)) * 100, 2))      #70.21% accuracy
+(pct_boosting = round(((z_boosting[1,1] + z_boosting[2,2]) / sum(z_boosting)) * 100, 2))  #66.67% accuracy
+(pct_rf = round(((z_rf[1,1] + z_rf[2,2]) / sum(z_rf)) * 100, 2))                          #65.96% accuracy
 
-rm(tr,te)
+#rm(tr,te)
 ```
 
 
@@ -262,6 +281,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     
@@ -312,6 +334,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     
@@ -363,6 +388,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     
@@ -414,6 +442,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     
@@ -465,6 +496,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     
@@ -516,6 +550,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     
@@ -567,6 +604,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     
@@ -618,6 +658,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     
@@ -671,6 +714,9 @@ l <- list()
 count <- 1
 
 for (i in c) {
+  
+  cat(i)
+  
   if(count %in% test1$index) {
     df <- test1[which(test1$index == count), ]
     

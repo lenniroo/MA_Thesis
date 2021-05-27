@@ -1,0 +1,187 @@
+---
+title: "web_scraping"
+author: "Lennart Roesemeier"
+date: "May 26, 2021"
+output: html_document
+---
+
+
+```{r}
+if (!("rvest" %in% installed.packages())) {
+ install.packages("rvest", dependencies = T)}
+if (!("tidyverse" %in% installed.packages())) {
+ install.packages("tidyverse", dependencies = T)}
+if (!("rstudioapi" %in% installed.packages())) {
+ install.packages("rstudioapi", dependencies = T)}
+if (!("purrr" %in% installed.packages())) {
+ install.packages("purrr", dependencies = T)}
+
+library(rvest)
+library(tidyverse)
+library(rstudioapi)
+library(purrr)
+```
+
+```{r}
+wd <- rstudioapi::getActiveDocumentContext()$path
+setwd(dirname(wd))
+print(getwd())
+```
+
+```{r, scrape the first 10 refugee incidents (mut-gegen-rechte-gewalt.de)}
+incipage <- "https://www.mut-gegen-rechte-gewalt.de/service/chronik-vorfaelle"
+inci <- read_html(incipage)
+
+date <- inci %>%
+  html_nodes("body") %>%
+  xml_find_all("//div[contains(@class, 'field-name-field-date')]") %>%
+  html_text()
+
+city <- inci %>%
+  xml_nodes("body") %>%
+  xml_find_all("//div[contains(@class, 'field field-name-field-city field-type-text field-label-hidden')]") %>%
+  html_text()
+
+state <- inci %>%
+  xml_nodes("body") %>%
+  xml_find_all("//div[contains(@class, 'field field-name-field-bundesland field-type-taxonomy-term-reference field-label-hidden')]") %>%
+  html_text()
+
+group_left <- inci %>%
+  xml_nodes("body") %>%
+  xml_find_all("//div[contains(@class, 'group-left')]") %>%
+  html_text()
+
+type <- inci %>%
+  xml_nodes("body") %>%
+  xml_find_all("//div[contains(@class, 'field-name-field-art')]") %>%
+  html_text()
+
+source <- inci %>%
+  xml_nodes("body") %>%
+  xml_find_all("//div[contains(@class, 'field field-name-field-source field-type-text-long field-label-inline clearfix')]") %>%
+  html_text()
+
+description <- inci %>%
+  xml_nodes("body") %>%
+  xml_find_all("//div[contains(@class, 'field field-name-body field-type-text-with-summary field-label-hidden')]") %>%
+  html_text()
+
+incidents <- data.frame(date, city, state, group_left, type, source, description)
+```
+
+```{r, scrape remaining information from mut-gegen-rechte-gewalt.de, p.2-576}
+url_base <- "https://www.mut-gegen-rechte-gewalt.de/service/chronik-vorfaelle?page=%d"
+
+d <- list()
+
+incidents_rest <- map_df(1:575, function(i) {
+  
+  cat(i)
+  
+  pg <- read_html(sprintf(url_base, i))
+  
+  date <- inci %>%
+    html_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field-name-field-date')]") %>%
+    html_text()
+
+  type <- inci %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field-name-field-art')]") %>%
+    html_text()
+  
+  city <- inci %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field field-name-field-city field-type-text field-label-hidden')]") %>%
+    html_text()
+
+  state <- inci %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field field-name-field-bundesland field-type-taxonomy-term-reference field-label-hidden')]") %>%
+    html_text()
+  
+  group_left <- pg %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'group-left')]") %>%
+    html_text()
+  
+  source <- inci %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field field-name-field-source field-type-text-long field-label-inline clearfix')]") %>%
+    html_text()
+  
+  description <- inci %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field field-name-body field-type-text-with-summary field-label-hidden')]") %>%
+    html_text()
+
+  data.frame(date, type, city, state, group_left, source, description)
+})
+
+#müller/schwartz data until 13.02 (p. 577, pgID: 576) 
+#incident: 1 Verletzte_r, Merseburg, Sachsen-Anhalt
+#Fünf junge Männer haben am Abend einen 20-jährigen, aus Syrien geflüchteten Mann mit einem Messer #bedroht und ihn geschlagen. Er floh in die Wohnung eines Bekannten in der Nähe und begab sich #später zur Behandlung in eine Klinik. 
+```
+
+```{r, merge both datasets}
+inc <- incidents %>%
+  bind_rows(incidents_rest)
+```
+
+
+
+```{r, scrape data of murder from https://www.amadeu-antonio-stiftung.de/todesopfer-rechter-gewalt/}
+murderpage <- "https://www.amadeu-antonio-stiftung.de/todesopfer-rechter-gewalt/"
+murder <- read_html(murderpage)
+
+date_m <- murder %>%
+    xml_nodes("body") %>%
+    xml_find_all("//span[contains(@class, 'text-grey-lightest bigdate pr-2 md:pr-0 md:block')]") %>%
+    html_text()
+
+location_m <- murder %>%
+  xml_nodes("body") %>%
+  xml_find_all("//span[contains (@class, 'text-grey-light mt-2 pr-2 md:pr-0 md:block')]") %>%
+  html_text()
+
+murder_d <- data.frame(date_m, location_m)
+
+state <- c("Berlin", "Berlin", 
+           "Bayern", "Bayern", "Bayern", "Bayern", "Bayern", "Bayern", "Bayern", "Bayern", "Bayern",
+           "Berlin",
+           "Bayern", 
+           "Sachsen",
+           "Niedersachsen",
+           "Sachsen",
+           "Saarland",
+           "Hessen",
+           "Sachsen-Anhalt", "Sachsen-Anhalt",
+           "Hessen", "Hessen", "Hessen", "Hessen", "Hessen", "Hessen", "Hessen", "Hessen", "Hessen", "Hessen")
+
+city <- c("Berlin", "Berlin",
+          "München", "München", "München", "München", "München", "München", "München", "München", "München",
+          "Berlin", "Georgensgmünd", "Döbeln", "Katlenburg-Lindau",
+          "Aue", "Neunkirchen-Wiebelskirchen", "Wolfhagen-Istha", "Halle", "Halle",
+          "Hanau", "Hanau", "Hanau", "Hanau", "Hanau", "Hanau", "Hanau", "Hanau", "Hanau", "Hanau")
+
+locations <- data.frame(city, state)
+
+murder_d$date_m <- as.Date(murder_d$date_m, format = "%d.%m.%Y")
+
+murder <- murder_d %>%
+  filter(date_m > "2014-12-31") %>%
+  bind_cols(locations) %>%
+  select(date_m, city, state) %>%
+  rename(date = date_m) %>%
+  mutate(type = "Mord")
+
+rm(murderpage, date_m, location_m, state, city, locations, murder_d)
+```
+
+
+
+
+
+
+
