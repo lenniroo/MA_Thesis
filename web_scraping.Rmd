@@ -73,30 +73,35 @@ incidents <- data.frame(date, city, state, group_left, type, source, description
 ```{r, scrape remaining information from mut-gegen-rechte-gewalt.de, p.2-576}
 url_base <- "https://www.mut-gegen-rechte-gewalt.de/service/chronik-vorfaelle?page=%d"
 
-d <- list()
+c <- 1:575
+links <- list()
 
-incidents_rest <- map_df(1:575, function(i) {
+for (i in c) {
+  links[[i]] <- sprintf(url_base, i)
+}
+
+links <- as.character(links)
+
+scrape = function(page) {
   
-  cat(i)
+  pg <- read_html(page)
   
-  pg <- read_html(sprintf(url_base, i))
-  
-  date <- inci %>%
+  date <-  pg %>%
     html_nodes("body") %>%
     xml_find_all("//div[contains(@class, 'field-name-field-date')]") %>%
     html_text()
 
-  type <- inci %>%
+  type <- pg %>%
     xml_nodes("body") %>%
     xml_find_all("//div[contains(@class, 'field-name-field-art')]") %>%
     html_text()
   
-  city <- inci %>%
+  city <- pg %>%
     xml_nodes("body") %>%
     xml_find_all("//div[contains(@class, 'field field-name-field-city field-type-text field-label-hidden')]") %>%
     html_text()
 
-  state <- inci %>%
+  state <- pg %>%
     xml_nodes("body") %>%
     xml_find_all("//div[contains(@class, 'field field-name-field-bundesland field-type-taxonomy-term-reference field-label-hidden')]") %>%
     html_text()
@@ -106,18 +111,56 @@ incidents_rest <- map_df(1:575, function(i) {
     xml_find_all("//div[contains(@class, 'group-left')]") %>%
     html_text()
   
-  source <- inci %>%
+  source <- pg %>%
     xml_nodes("body") %>%
     xml_find_all("//div[contains(@class, 'field field-name-field-source field-type-text-long field-label-inline clearfix')]") %>%
     html_text()
   
-  description <- inci %>%
+  description <- pg %>%
     xml_nodes("body") %>%
     xml_find_all("//div[contains(@class, 'field field-name-body field-type-text-with-summary field-label-hidden')]") %>%
     html_text()
+  
+  return(data.frame(date, type, city, state, group_left, source, description))
+}
 
-  data.frame(date, type, city, state, group_left, source, description)
-})
+
+d <- vector("list", length(links))
+
+
+
+for (i in seq_along(links)) {
+  if (!(links[i] %in% names(d))) {
+    cat(paste("Scraping", links[i], "..."))
+    ok <- F
+    counter <- 0
+    while(ok == F & counter <= 1) {
+      counter <- counter + 1
+      out <- tryCatch({
+        scrape(links[i])
+      },
+        error = function(e) {
+          Sys.sleep(2)
+          e
+        }
+      )
+      if ("error" %in% class(out)) {
+        cat(".")
+        if (counter == 10) {
+          error <- data.frame(out, i)
+        }
+      } else {
+          ok <- T
+          d[[i]] <- out
+          incidents_rest <- bind_rows(d)
+          cat(paste("\n", i," Done!"))
+        }
+    }
+    cat("\n")
+    names(d)[i] <- links[i]
+    }
+}
+
 
 #müller/schwartz data until 13.02 (p. 577, pgID: 576) 
 #incident: 1 Verletzte_r, Merseburg, Sachsen-Anhalt
