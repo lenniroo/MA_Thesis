@@ -6,7 +6,7 @@ output: html_document
 ---
 
 
-```{r}
+```{r, loading required packages}
 if (!("rvest" %in% installed.packages())) {
  install.packages("rvest", dependencies = T)}
 if (!("tidyverse" %in% installed.packages())) {
@@ -23,121 +23,124 @@ library(purrr)
 ```
 
 ```{r}
-wd <- rstudioapi::getActiveDocumentContext()$path
+wd <- getActiveDocumentContext()$path
 setwd(dirname(wd))
 print(getwd())
 ```
 
-```{r, scrape the first 10 refugee incidents (mut-gegen-rechte-gewalt.de)}
-incipage <- "https://www.mut-gegen-rechte-gewalt.de/service/chronik-vorfaelle"
-inci <- read_html(incipage)
-
-date <- inci %>%
-  html_nodes("body") %>%
-  xml_find_all("//div[contains(@class, 'field-name-field-date')]") %>%
-  html_text()
-
-city <- inci %>%
-  xml_nodes("body") %>%
-  xml_find_all("//div[contains(@class, 'field field-name-field-city field-type-text field-label-hidden')]") %>%
-  html_text()
-
-state <- inci %>%
-  xml_nodes("body") %>%
-  xml_find_all("//div[contains(@class, 'field field-name-field-bundesland field-type-taxonomy-term-reference field-label-hidden')]") %>%
-  html_text()
-
-group_left <- inci %>%
-  xml_nodes("body") %>%
-  xml_find_all("//div[contains(@class, 'group-left')]") %>%
-  html_text()
-
-type <- inci %>%
-  xml_nodes("body") %>%
-  xml_find_all("//div[contains(@class, 'field-name-field-art')]") %>%
-  html_text()
-
-source <- inci %>%
-  xml_nodes("body") %>%
-  xml_find_all("//div[contains(@class, 'field field-name-field-source field-type-text-long field-label-inline clearfix')]") %>%
-  html_text()
-
-description <- inci %>%
-  xml_nodes("body") %>%
-  xml_find_all("//div[contains(@class, 'field field-name-body field-type-text-with-summary field-label-hidden')]") %>%
-  html_text()
-
-incidents <- data.frame(date, city, state, group_left, type, source, description)
+```{r, function of information that going to be scraped from the incidents website}
+#function to scrape the required information
+scrape_incidents = function(page) {
+  
+  pg <- html_session(page)
+  
+  #date of incident
+  date <-  pg %>%
+    html_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field-name-field-date')]") %>%
+    html_text()
+  
+  #type of incident
+  type <- pg %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field-name-field-art')]") %>%
+    html_text()
+  
+  #city where the incident happend
+  city <- pg %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field field-name-field-city field-type-text field-label-hidden')]") %>%
+    html_text()
+  
+  #federal state where the incident happend
+  state <- pg %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field field-name-field-bundesland field-type-taxonomy-term-reference field-label-hidden')]") %>%
+    html_text()
+  
+  #since the incidents not always end up with injured people, the html-class of injuries is not always activ
+  #hence, I scraped the whole left information block (city, state, source, injuries) to extract the injuries later
+  group_left <- pg %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'group-left')]") %>%
+    html_text()
+  
+  #information source
+  source <- pg %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field field-name-field-source field-type-text-long field-label-inline clearfix')]") %>%
+    html_text()
+  
+  #description of the incident from the source
+  description <- pg %>%
+    xml_nodes("body") %>%
+    xml_find_all("//div[contains(@class, 'field field-name-body field-type-text-with-summary field-label-hidden')]") %>%
+    html_text()
+  
+  #binding all information to a list
+  list_inci <- list(date, type, city, state, group_left, source, description)
+  #sometimes information is missing, therefore it declared as NA
+  max_length <-  max(sapply(list_inci, length))
+  #function returns a data frame of all information pieces
+  return(data.frame(sapply(list_inci, function(x) {
+    c(x, rep(NA, max_length - length(x)))
+  })))
+}
 ```
 
-```{r, scrape remaining information from mut-gegen-rechte-gewalt.de, p.2-576}
+
+```{r, scrape the first page of refugee incidents (mut-gegen-rechte-gewalt.de), last access: 4th June 2021}
+incidents <- scrape_incidents("https://www.mut-gegen-rechte-gewalt.de/service/chronik-vorfaelle")
+
+incidents <- incidents %>%
+  rename("date" = "X1", "type" = "X2", "city" = "X3", "state" = "X4", "group_left" = "X5", "source" = "X6", "description" = "X7")
+
+save(incidents, file = "incidents10_data.Rdata")
+```
+
+```{r, scrape remaining information from mut-gegen-rechte-gewalt.de, p.2-576, last access on all links: 4th June 2021}
+#underlying URL structure 
 url_base <- "https://www.mut-gegen-rechte-gewalt.de/service/chronik-vorfaelle?page=%d"
 
+#page 576 (pageID = 575) is the last one with new information, 
+#remaining information is in the dataset from Müller and Schwarz (2020) (data until 13.02 (p. 577, pgID: 576))
 c <- 1:575
 links <- list()
 
+#pasting page IDs and URLs
 for (i in c) {
   links[[i]] <- sprintf(url_base, i)
 }
 
 links <- as.character(links)
 
-scrape = function(page) {
-  
-  pg <- read_html(page)
-  
-  date <-  pg %>%
-    html_nodes("body") %>%
-    xml_find_all("//div[contains(@class, 'field-name-field-date')]") %>%
-    html_text()
-
-  type <- pg %>%
-    xml_nodes("body") %>%
-    xml_find_all("//div[contains(@class, 'field-name-field-art')]") %>%
-    html_text()
-  
-  city <- pg %>%
-    xml_nodes("body") %>%
-    xml_find_all("//div[contains(@class, 'field field-name-field-city field-type-text field-label-hidden')]") %>%
-    html_text()
-
-  state <- pg %>%
-    xml_nodes("body") %>%
-    xml_find_all("//div[contains(@class, 'field field-name-field-bundesland field-type-taxonomy-term-reference field-label-hidden')]") %>%
-    html_text()
-  
-  group_left <- pg %>%
-    xml_nodes("body") %>%
-    xml_find_all("//div[contains(@class, 'group-left')]") %>%
-    html_text()
-  
-  source <- pg %>%
-    xml_nodes("body") %>%
-    xml_find_all("//div[contains(@class, 'field field-name-field-source field-type-text-long field-label-inline clearfix')]") %>%
-    html_text()
-  
-  description <- pg %>%
-    xml_nodes("body") %>%
-    xml_find_all("//div[contains(@class, 'field field-name-body field-type-text-with-summary field-label-hidden')]") %>%
-    html_text()
-  
-  return(data.frame(date, type, city, state, group_left, source, description))
-}
-
-
+#empty vector with length of the number of links
+#with each round of the follwing for-loop the scraped link will be paste
 d <- vector("list", length(links))
 
+#if needed one can load the previous scraped data, because the data of every for-loop round will be stored
+#load("incidents_rest.Rdata")
+#load("list_scrapedlinks.Rdata")
 
-
+#for-loop that breaks with an error message if the scraped link cannot be accessed within 20 seconds
+##also it prints a message for every stage of the loop 
+###if it scrapes: 'Scraping link[i] ... '
+###every new access try of one link will be displayed with an additional point, 
+#####i.e. if an URL cannot accessed (three times) the message would be 'Scraping link[i] ...... '
+###if it's done: '[i] Done!'
+###if website cannot accessed it breaks with a data.frame error message, since error-class cannot create data.frame
+####also it stores every round in an vector, so if the loop breaks it will skip links that are scrape up to this point
+#moreover, the factor levels are sometimes unequal, therefore charcter and factor are coerced to binding to a vector, to have the best overview of the scraping process these warnings get suppressed
+suppressWarnings({
 for (i in seq_along(links)) {
   if (!(links[i] %in% names(d))) {
     cat(paste("Scraping", links[i], "..."))
     ok <- F
     counter <- 0
-    while(ok == F & counter <= 1) {
+    while(ok == F & counter <= 10) {
       counter <- counter + 1
       out <- tryCatch({
-        scrape(links[i])
+        scrape_incidents(links[i])
       },
         error = function(e) {
           Sys.sleep(2)
@@ -146,30 +149,41 @@ for (i in seq_along(links)) {
       )
       if ("error" %in% class(out)) {
         cat(".")
+        ###
         if (counter == 10) {
-          error <- data.frame(out, i)
+          error <-data.frame(out, i)
         }
       } else {
           ok <- T
           d[[i]] <- out
           incidents_rest <- bind_rows(d)
+          save(incidents_rest, file = "incidents_rest.Rdata")
           cat(paste("\n", i," Done!"))
         }
     }
     cat("\n")
     names(d)[i] <- links[i]
-    }
+    save(d, file = "list_scrapedlinks.Rdata")
+  }
 }
-
-
+})
 #müller/schwartz data until 13.02 (p. 577, pgID: 576) 
 #incident: 1 Verletzte_r, Merseburg, Sachsen-Anhalt
-#Fünf junge Männer haben am Abend einen 20-jährigen, aus Syrien geflüchteten Mann mit einem Messer #bedroht und ihn geschlagen. Er floh in die Wohnung eines Bekannten in der Nähe und begab sich #später zur Behandlung in eine Klinik. 
+#Fünf junge Männer haben am Abend einen 20-jährigen, aus Syrien geflüchteten Mann mit einem Messer 
+#bedroht und ihn geschlagen. Er floh in die Wohnung eines Bekannten in der Nähe und begab sich #später zur Behandlung in eine Klinik. 
+
+incidents_rest <- incidents_rest %>%
+  rename("date" = "X1", "type" = "X2", "city" = "X3", "state" = "X4", "group_left" = "X5", "source" = "X6", "description" = "X7")
+
 ```
 
-```{r, merge both datasets}
-inc <- incidents %>%
+```{r, merge both incident datasets}
+incidents <- incidents %>%
   bind_rows(incidents_rest)
+
+write.csv(incidents, "incidents_data.csv", row.names = F, fileEncoding = "utf-8")
+
+rm(incidents_rest)
 ```
 
 
@@ -219,7 +233,21 @@ murder <- murder_d %>%
   rename(date = date_m) %>%
   mutate(type = "Mord")
 
+save(murder, file = "rightWing_murderData.Rdata")
+
 rm(murderpage, date_m, location_m, state, city, locations, murder_d)
+```
+
+```{r}
+incidents$date <- as.Date(incidents$date, format = "%d.%m.%Y")
+
+all <- incidents %>%
+  bind_rows(murder) %>%
+  arrange(desc(date))
+
+save(all, file = "incidentsANDmurder.Rdata")
+  
+write.csv(all, "all_incidentsMurder_data.csv", row.names = F, fileEncoding = "utf-8")
 ```
 
 
