@@ -1,0 +1,204 @@
+---
+title: "nGrams"
+author: "Lennart Roesemeier"
+date: "July 8, 2021"
+output: html_document
+---
+
+```{r}
+if (!("rstudioapi" %in% installed.packages())) {
+ install.packages("rstudioapi", dependencies = T)}
+if (!("tidytext" %in% installed.packages())) {
+ install.packages("tidytext", dependencies = T)}
+if (!("tidyverse" %in% installed.packages())) {
+  install.packages("tidyverse", dependencies = T)}
+if (!("dplyr" %in% installed.packages())) {
+  install.packages("dplyr", dependencies = T)}
+if (!("stringi" %in% installed.packages())) {
+ install.packages("stringi", dependencies = T)}
+if (!("stringr" %in% installed.packages())) {
+ install.packages("stringr", dependencies = T)}
+if (!("tm" %in% installed.packages())) {
+ install.packages("tm", dependencies = T)}
+
+
+library(rstudioapi)
+library(tidytext)
+library(tidyverse)
+library(dplyr)
+library(stringi)
+library(stringr)
+library(tm)
+```
+
+```{r}
+wd <- getActiveDocumentContext()$path
+setwd(dirname(wd))
+print(getwd())
+```
+
+
+```{r}
+tweets_dirty <- read.csv2("tweets_hateSpeech.csv", encoding = "UTF-8", sep = ",", stringsAsFactors = F)
+
+
+
+encode_umlauts <- function(x) {
+  x <- stringr::str_replace_all(x, c('Ã„' = "Ae", "Ã–" = "Oe", "Ãœ" = "Ue",
+                            "Ã¤" = "ae", "Ã¶" = "oe", "Ã¼" = "ue"))
+}
+encode_umlauts_1 <- function(x) {
+  x <- stringr::str_replace_all(x, c('Ä' = "A", "Ö" = "O", "Ü" = "U",
+                            "ä" = "a", "ö" = "o", "ü" = "u"))
+}
+
+tweets_dirty$full_text <- encode_umlauts_1(tweets_dirty$full_text)
+
+
+
+removeURL <- function(x) gsub("(f|ht)tp(s?)://\\S+", "", x, perl=T) 
+
+tweets_dirty$full_text <- removeURL(tweets_dirty$full_text)
+
+
+
+remove_usernames <- function(x) gsub("@\\w+", "", x)
+
+tweets_dirty$full_text <- remove_usernames(tweets_dirty$full_text)
+
+
+
+clean_tweets <- function(x) {
+  x <- gsub("ÃŸ", "s", x)
+  x <- gsub("[\r\n]", "", x)
+  x <- gsub("[[:punct:]]", "", x)
+  x <- gsub("[^[:alnum:]]", " ", x)
+  x <- gsub("[^a-zA-Z0-9]", " ", x)
+  x <- gsub("amp", "", x)
+}
+
+tweets_dirty$full_text <- clean_tweets(tweets_dirty$full_text)
+
+
+
+corpus <- iconv(tweets_dirty$full_text)
+corpus <- Corpus(VectorSource(corpus))
+
+tweets_clean <- tm_map(corpus, stripWhitespace)
+twee <- data.frame(t = sapply(tweets_clean, as.character), stringsAsFactors = F)
+tweets_dirty$full_text <- twee$t
+
+trim <- function (x) gsub("^\\s+|\\s+$", "", x)
+trim(tweets_dirty$full_text)
+
+
+
+tweets_dirty$full_text <- tolower(tweets_dirty$full_text)
+
+tweets <- tweets_dirty
+tweets$full_text <- tweets_dirty$full_text
+
+
+rm(corpus, twee, tweets_clean, tweets_dirty)
+```
+
+
+
+```{r}
+twee <- tweets[ , 2]
+twee[twee == " "] <- NA
+twee <- na.omit(twee)
+
+l <- list()
+luni <- list()
+lbi <- list()
+ltri <- list()
+counter <- 0
+#loop does not iterate properly, it bypassed some entries, perhaps it depends on the whitespace at the beginng or first character
+for (i in twee) {
+  counter <- counter + 1
+  
+  cat(paste("Counting:", counter, "...", "\n"))
+  
+  string_count <- as.integer(sapply(gregexpr("[[:alnum:]]+", i), function(count) sum(count > 0)))
+  strings <- data.frame(i, string_count, counter, stringsAsFactors = F)
+  ii <- as.data.frame(i, stringsAsFactors = F, row.names = NULL)
+  
+  if(nrow(strings) != string_count){
+    s <- data.frame(strings[rep(seq_len(dim(strings)[1]), strings$string_count), , drop = F], row.names = NULL)
+    u <- ii %>%
+      unnest_tokens(unigram, i, token = "ngrams", n = 1)
+    b <- ii %>%
+      unnest_tokens(bigram, i, token = "ngrams", n = 2)
+    t <- ii %>%
+      unnest_tokens(trigram, i, token = "ngrams", n = 3)
+    
+    l[[i]] <- s
+    lu <- as.list(as.data.frame(t(u), stringsAsFactors = F))
+    lb <- as.list(as.data.frame(t(b), stringsAsFactors = F))
+    lt <- as.list(as.data.frame(t(t), stringsAsFactors = F))
+  
+    n <- max(length(lu), length(lb), length(lt))
+    length(lu) <- n
+    length(lb) <- n
+    length(lt) <- n
+  
+    ngrams <- as.data.frame(cbind(lu, lb, lt), row.names = NULL, stringsAsFactors = F)
+  
+    ngrams <- ngrams %>% 
+      mutate_all(list(~na_if(., "NULL")))
+  
+    luni[[i]] <- data.frame(unlist(ngrams$lu), stringsAsFactors = F, row.names = NULL)
+    lbi[[i]] <- data.frame(unlist(ngrams$lb), stringsAsFactors = F, row.names = NULL)
+    ltri[[i]] <- data.frame(unlist(ngrams$lt), stringsAsFactors = F, row.names = NULL)
+  
+    str_length <- bind_rows(l)
+    str_length$uni <- bind_rows(luni)
+    str_length$bi <- bind_rows(lbi)
+    str_length$tri <- bind_rows(ltri)
+  
+    str_length$uni <- as.character(unlist(str_length[1:nrow(str_length$uni), 4]))
+    str_length$bi <- as.character(unlist(str_length[1:nrow(str_length$bi), 5]))
+    str_length$tri <- as.character(unlist(str_length[1:nrow(str_length$tri), 6]))
+  }
+
+  cat(paste("Done!", "\n"))
+}
+
+write.csv2(str_length, "count_ngrams_hateSpeech_2015-2020.csv", row.names = F, fileEncoding = "utf-8")
+#str_length <- read.csv2("count_ngrams_hateSpeech_2015-2020.csv", fileEncoding = "utf-8")
+
+bypassed <- data.frame(c(1:820813)) %>%
+  rename("counter" = "c.1.820813.") %>%
+  anti_join(str_length, by = "counter")
+
+rm(twee, counter, i, ii, string_count, strings, s, u, b, t, l, lu, lb, lt, n, ngrams, luni, lbi, ltri)
+```
+
+
+```{r}
+#tweets <- tweets %>%
+#  rename(tweet = full_text) %>%
+#  full_join(str_length, by = "tweet") %>%
+#  arrange(loop_count)
+
+#str_length <- tweets[ ,c("tweet", "str_count", "loop_count")]
+
+
+#not stored in oneDrive (would blow the cloud memory lol) but in googleDrive or local study folder
+#str_duplicated <- data.frame(str_length[rep(seq_len(dim(str_length)[1]), str_length$str_count), , drop = F], row.names = NULL) 
+#write.csv2(str_duplicated, "duplicatedRows_ngram_hateSpeech_2015-2020.csv", row.names = F, fileEncoding = "utf-8")
+```
+
+
+
+
+
+```{r}
+tri_tfidf <- tri_sort %>%
+  bind_tf_idf(trigram, n) %>% #error (column containing terms, column containing doc IDs -- Dafuq?!)
+  arrange(desc(tf_idf))
+```
+
+
+
